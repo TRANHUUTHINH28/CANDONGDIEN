@@ -1,310 +1,380 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Header from './components/Header';
 import SimulationView from './components/SimulationView';
 import Controls from './components/Controls';
 import MeasurementTable from './components/MeasurementTable';
 import { Measurement, SimulationState } from './types';
 import { gaussianRandom, PHYSICS_CONSTANTS, calculateMagneticForce } from './utils/math';
-import { CheckCircle2, AlertCircle, Info, Calculator } from 'lucide-react';
+import { 
+  CheckCircle2, 
+  Calculator, 
+  CloudUpload, 
+  Loader2, 
+  Target, 
+  ChevronRight, 
+  BookOpen, 
+  ArrowRight, 
+  Settings2,
+  RefreshCcw,
+  AlertCircle,
+  Trophy,
+  PartyPopper
+} from 'lucide-react';
 
 const App: React.FC = () => {
-  // Session Constants
+  // Trạng thái phiên thí nghiệm
   const [session, setSession] = useState<SimulationState>(() => ({
-    targetB: 0.02 + Math.random() * 0.03, // Random [0.02, 0.05]
-    fOffset: 0.200 + Math.random() * 0.02, // System error offset ~0.210N
+    targetB: 0.0175 + (Math.random() - 0.5) * 0.003, 
+    fOffset: 0.210, 
     currentI: 0,
     isBalanced: true,
     isOverheated: false,
     tiltAngle: 0,
   }));
 
-  const [measurements, setMeasurements] = useState<Measurement[]>([]);
-  const [displayedForce, setDisplayedForce] = useState<number>(session.fOffset);
-  
-  // Student Submission State
-  const [studentAvgB, setStudentAvgB] = useState<string>('');
-  const [studentErrorB, setStudentErrorB] = useState<string>('');
-  const [submissionResult, setSubmissionResult] = useState<'success' | 'fail' | null>(null);
+  // Khởi tạo bảng đo
+  const initMeasurements = () => {
+    const defaultI = [0.2, 0.4, 0.6, 0.8];
+    return defaultI.map(i => ({
+      id: crypto.randomUUID(),
+      trueCurrent: i,
+      trueF1: 0.210,
+      trueF2: 0, 
+      trueF: 0,
+      inputI: i.toFixed(2),
+      inputF1: '',
+      inputF2: '',
+      inputF: '',
+      inputB: '',
+      isValidated: false
+    }));
+  };
 
-  // Update logic when Current changes
+  const [measurements, setMeasurements] = useState<Measurement[]>(initMeasurements);
+  const [displayedForce, setDisplayedForce] = useState<number>(session.fOffset);
+  const [studentName, setStudentName] = useState<string>('');
+  const [studentClass, setStudentClass] = useState<string>('');
+  const [studentAvgB, setStudentAvgB] = useState<string>('');
+  const [studentDeltaB, setStudentDeltaB] = useState<string>('');
+  const [isSyncing, setIsSyncing] = useState<boolean>(false);
+  const [hasSubmitted, setHasSubmitted] = useState<boolean>(false);
+  const [submissionFeedback, setSubmissionFeedback] = useState<{ type: 'success' | 'warning', message: string, percent: string } | null>(null);
+
+  // Hiệu ứng vật lý
   useEffect(() => {
     const fMag = calculateMagneticForce(session.currentI, session.targetB);
-    const calculatedTilt = fMag * 20; 
+    const currentTilt = session.isBalanced ? 0 : fMag * 55;
     
-    setSession(prev => ({
-      ...prev,
-      tiltAngle: calculatedTilt,
-      isBalanced: session.currentI === 0, 
-      isOverheated: session.currentI > 0.8
+    setSession(prev => ({ 
+      ...prev, 
+      tiltAngle: currentTilt, 
+      isOverheated: session.currentI > 0.8 
     }));
-
-    const noise = gaussianRandom(0, 0.0005);
-    setDisplayedForce(session.fOffset + fMag + noise);
-  }, [session.currentI, session.targetB, session.fOffset]);
+    
+    const timer = setInterval(() => {
+      const noise = gaussianRandom(0, 0.0035);
+      setDisplayedForce(session.fOffset + fMag + noise);
+    }, 100);
+    
+    return () => clearInterval(timer);
+  }, [session.currentI, session.targetB, session.fOffset, session.isBalanced]);
 
   const handleCurrentChange = (val: number) => {
-    setSession(prev => ({ ...prev, currentI: val }));
+    if (hasSubmitted) return;
+    setSession(prev => ({ 
+      ...prev, 
+      currentI: val, 
+      isBalanced: val === 0 
+    }));
   };
 
   const handleBalance = () => {
-    const { currentI, targetB, fOffset, isOverheated } = session;
-    const fMagBase = calculateMagneticForce(currentI, targetB);
-    const errorMagnitude = isOverheated ? 0.05 : 0.015;
-    const f2Raw = fOffset + fMagBase;
-    const f2WithNoise = gaussianRandom(f2Raw, Math.max(0.001, f2Raw * errorMagnitude));
-    
-    const f2 = Math.round(f2WithNoise * 1000) / 1000;
-    const f1 = Math.round(fOffset * 1000) / 1000;
-    const f = Math.round((f2 - f1) * 1000) / 1000;
-    
-    const newMeasurement: Measurement = {
-      id: crypto.randomUUID(),
-      current: currentI,
-      f1,
-      f2,
-      f
-    };
-
-    setMeasurements(prev => [...prev, newMeasurement]);
-    setSession(prev => ({ ...prev, isBalanced: true, tiltAngle: 0 }));
-    setDisplayedForce(f2);
+    if (hasSubmitted) return;
+    const captured = displayedForce;
+    setMeasurements(prev => prev.map(m => {
+      if (Math.abs(parseFloat(m.inputI) - session.currentI) < 0.01) {
+        return {
+          ...m,
+          trueF1: session.fOffset,
+          trueF2: captured,
+          trueF: captured - session.fOffset
+        };
+      }
+      return m;
+    }));
+    setSession(prev => ({ ...prev, isBalanced: true }));
   };
 
   const handleReset = () => {
-    if (confirm("Bạn có muốn đặt lại toàn bộ phiên thí nghiệm không? (Giá trị B sẽ được tạo mới)")) {
-      const newOffset = 0.200 + Math.random() * 0.02;
-      setSession({
-        targetB: 0.02 + Math.random() * 0.03,
-        fOffset: newOffset,
-        currentI: 0,
-        isBalanced: true,
-        isOverheated: false,
-        tiltAngle: 0,
-      });
-      setDisplayedForce(newOffset);
-      setMeasurements([]);
-      setStudentAvgB('');
-      setStudentErrorB('');
-      setSubmissionResult(null);
-    }
+    setMeasurements(initMeasurements());
+    setSession({
+      targetB: 0.0175 + (Math.random() - 0.5) * 0.003,
+      fOffset: 0.210,
+      currentI: 0,
+      isBalanced: true,
+      isOverheated: false,
+      tiltAngle: 0,
+    });
+    setStudentAvgB('');
+    setStudentDeltaB('');
+    setHasSubmitted(false);
+    setSubmissionFeedback(null);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const verifyResult = () => {
-    const avg = parseFloat(studentAvgB);
-    if (isNaN(avg)) {
-      alert("Vui lòng nhập giá trị trung bình B hợp lệ.");
-      return;
-    }
+  // Tính toán LỜI GIẢI CHUẨN (với nhiễu thực tế)
+  const solutionData = useMemo(() => {
+    const iValues = [0.2, 0.4, 0.6, 0.8];
+    const rawTrials = iValues.map((i, index) => {
+      const jitter = (Math.sin(index * 1.5 + session.targetB * 1000) * 0.0004);
+      const bTrial = session.targetB + jitter;
+      const fMag = calculateMagneticForce(i, bTrial);
+      return { i, f1: session.fOffset, f2: session.fOffset + fMag, f: fMag, b: bTrial };
+    });
 
-    const diffPercent = Math.abs(avg - session.targetB) / session.targetB;
-    if (diffPercent <= 0.1) {
-      setSubmissionResult('success');
-    } else {
-      setSubmissionResult('fail');
-    }
+    const avgB = rawTrials.reduce((sum, t) => sum + t.b, 0) / rawTrials.length;
+    const trials = rawTrials.map(t => ({
+      ...t,
+      deltaBi: Math.abs(avgB - t.b)
+    }));
+    const avgDeltaB = trials.reduce((sum, t) => sum + t.deltaBi, 0) / trials.length;
+
+    return {
+      trials,
+      avgB,
+      avgBRounded: avgB.toFixed(4),
+      avgDeltaB,
+      avgDeltaBRounded: avgDeltaB.toFixed(4)
+    };
+  }, [session.targetB, session.fOffset]);
+
+  const handleSync = async () => {
+    if (!studentName || !studentClass) return alert("Vui lòng nhập Tên và Lớp.");
+    if (!studentAvgB) return alert("Vui lòng nhập giá trị B trung bình.");
+    
+    setIsSyncing(true);
+    setTimeout(() => {
+      const studentVal = parseFloat(studentAvgB.replace(',', '.'));
+      const errorPercentValue = (Math.abs(studentVal - solutionData.avgB) / solutionData.avgB) * 100;
+      const formattedPercent = errorPercentValue.toFixed(2);
+
+      if (errorPercentValue <= 8) {
+        setSubmissionFeedback({ 
+          type: 'success', 
+          message: `Chúc mừng bạn ${studentName}! Bạn đã hoàn thành xuất sắc bài thực hành.`,
+          percent: formattedPercent
+        });
+      } else {
+        setSubmissionFeedback({ 
+          type: 'warning', 
+          message: `Chào bạn ${studentName}, kết quả của bạn có sai lệch khá cao so với hệ thống. Hãy làm cẩn thận hơn!`,
+          percent: formattedPercent
+        });
+      }
+      setHasSubmitted(true);
+      setIsSyncing(false);
+    }, 800);
   };
-
-  // Helper for explanation data
-  const validMeasurements = measurements.filter(m => m.current > 0);
-  const bValues = validMeasurements.map(m => m.f / (PHYSICS_CONSTANTS.N * m.current * PHYSICS_CONSTANTS.L));
-  const avgB_Actual = bValues.length > 0 ? bValues.reduce((a, b) => a + b, 0) / bValues.length : session.targetB;
-  const deltaBValues = bValues.map(b => Math.abs(avgB_Actual - b));
-  const avgDeltaB = deltaBValues.length > 0 ? deltaBValues.reduce((a, b) => a + b, 0) / deltaBValues.length : 0.001;
 
   return (
-    <div className="min-h-screen bg-slate-100 pb-24">
+    <div className="min-h-screen bg-slate-50 pb-32 font-sans text-slate-900">
       <Header />
-      
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-          
+      <main className="max-w-7xl mx-auto px-4 pt-8">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
           <div className="lg:col-span-8 space-y-8">
             <SimulationView 
               currentI={session.currentI} 
-              tiltAngle={session.tiltAngle}
-              isBalanced={session.isBalanced}
-              displayedForce={displayedForce}
+              tiltAngle={session.tiltAngle} 
+              isBalanced={session.isBalanced} 
+              displayedForce={displayedForce} 
             />
             
             <MeasurementTable 
               measurements={measurements} 
-              onRemove={(id) => setMeasurements(prev => prev.filter(m => m.id !== id))}
-              onClear={() => setMeasurements([])}
+              onRemove={() => {}} 
+              onClear={() => {}} 
+              onUpdateRow={(id, f, v) => setMeasurements(prev => prev.map(m => m.id === id ? {...m, [f]: v} : m))} 
+              onValidateRow={() => {}} 
             />
 
-            {/* Báo cáo kết quả của Học sinh */}
-            <div className="bg-white p-6 rounded-xl shadow-lg border border-slate-200">
-              <h3 className="text-lg font-bold text-slate-800 mb-4 flex items-center gap-2">
-                <Calculator className="w-5 h-5 text-indigo-500" />
-                Nộp Báo Cáo Tính Toán
-              </h3>
-              
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Giá trị trung bình B̄ (Tesla)</label>
-                  <input 
-                    type="number" 
-                    step="0.0001"
-                    placeholder="VD: 0.0350"
-                    value={studentAvgB}
-                    onChange={(e) => setStudentAvgB(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-slate-700">Sai số tuyệt đối ΔB (Tesla)</label>
-                  <input 
-                    type="number" 
-                    step="0.0001"
-                    placeholder="VD: 0.0012"
-                    value={studentErrorB}
-                    onChange={(e) => setStudentErrorB(e.target.value)}
-                    className="w-full px-4 py-2 rounded-lg border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none font-mono"
-                  />
+            {/* BÁO CÁO KẾT QUẢ - DARK THEME */}
+            <div className="bg-white p-8 rounded-3xl shadow-xl border border-slate-200">
+              <div className="flex items-center justify-between mb-8 border-b border-slate-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <Target className="w-6 h-6 text-orange-500" />
+                  <h3 className="text-xl font-black text-slate-800 uppercase tracking-tight">Báo cáo thực hành</h3>
                 </div>
               </div>
 
-              <button 
-                onClick={verifyResult}
-                disabled={measurements.length === 0}
-                className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all shadow-md active:scale-95 disabled:bg-slate-300 disabled:cursor-not-allowed"
-              >
-                Kiểm tra kết quả
-              </button>
+              <div className="space-y-8">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Học sinh</label>
+                    <input type="text" disabled={hasSubmitted} value={studentName} onChange={(e) => setStudentName(e.target.value)} placeholder="Tên..." className="w-full px-5 py-3 rounded-xl border border-slate-200 outline-none font-bold text-slate-700 bg-slate-50 focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Lớp</label>
+                    <input type="text" disabled={hasSubmitted} value={studentClass} onChange={(e) => setStudentClass(e.target.value)} placeholder="Lớp..." className="w-full px-5 py-3 rounded-xl border border-slate-200 outline-none font-bold text-slate-700 bg-slate-50 focus:ring-2 focus:ring-orange-500" />
+                  </div>
+                </div>
 
-              {/* Phản hồi cho học sinh */}
-              {submissionResult === 'success' && (
-                <div className="mt-6 bg-emerald-50 border-2 border-emerald-200 p-5 rounded-2xl animate-in fade-in slide-in-from-bottom-4">
-                  <div className="flex items-center gap-4">
-                    <CheckCircle2 className="w-10 h-10 text-emerald-500 shrink-0" />
-                    <div>
-                      <h4 className="text-lg font-bold text-emerald-800">Tuyệt vời! Chính xác!</h4>
-                      <p className="text-emerald-700">Bạn đã thực hiện phép đo và tính toán rất tốt. Giá trị bạn đưa ra hoàn toàn khớp với thực tế trong phòng thí nghiệm. Chúc mừng bạn!</p>
+                <div className="bg-[#050914] text-white rounded-[2.5rem] p-10 space-y-10 shadow-2xl border border-slate-800">
+                  <div className="flex items-center gap-2 text-indigo-400 font-bold italic text-sm">
+                    <ChevronRight className="w-4 h-4" />
+                    <span>Kết quả tính toán của bạn:</span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-10 px-2">
+                    <div className="space-y-4">
+                      <label className="text-[11px] text-slate-400 font-bold tracking-wider uppercase ml-1">B trung bình (Tesla):</label>
+                      <input type="text" disabled={hasSubmitted} value={studentAvgB} onChange={(e) => setStudentAvgB(e.target.value)} placeholder="0.0" className="w-full px-8 py-6 rounded-2xl border border-slate-800 bg-[#0f172a] font-mono font-black text-3xl text-orange-400 focus:ring-2 focus:ring-indigo-500 outline-none text-center shadow-inner" />
+                    </div>
+                    <div className="space-y-4">
+                      <label className="text-[11px] text-slate-400 font-bold tracking-wider uppercase ml-1">Sai số (Tesla):</label>
+                      <input type="text" disabled={hasSubmitted} value={studentDeltaB} onChange={(e) => setStudentDeltaB(e.target.value)} placeholder="0.0" className="w-full px-8 py-6 rounded-2xl border border-slate-800 bg-[#0f172a] font-mono font-black text-3xl text-orange-400 focus:ring-2 focus:ring-indigo-500 outline-none text-center shadow-inner" />
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col items-center py-4">
+                    <div className="bg-[#5a46ff] text-white px-16 py-6 rounded-3xl font-mono font-black text-4xl shadow-[0_0_40px_rgba(90,70,255,0.4)] tracking-tight">
+                      B = {studentAvgB || "---"} ± {studentDeltaB || "---"} (T)
                     </div>
                   </div>
                 </div>
-              )}
 
-              {submissionResult === 'fail' && (
-                <div className="mt-6 space-y-4 animate-in fade-in slide-in-from-bottom-4">
-                  <div className="bg-rose-50 border-2 border-rose-100 p-5 rounded-2xl flex items-center gap-4 text-rose-800">
-                    <AlertCircle className="w-8 h-8 shrink-0" />
-                    <p className="font-medium">Giá trị tính toán chưa chính xác. Hãy rà soát lại các bước thay số và tính toán sai số bên dưới nhé!</p>
-                  </div>
-                  
-                  <div className="bg-slate-900 text-slate-300 p-6 rounded-2xl shadow-inner border border-slate-800">
-                    <div className="flex items-center gap-2 mb-4 text-indigo-400">
-                      <Info className="w-5 h-5" />
-                      <span className="text-sm font-black uppercase tracking-widest">Hướng dẫn tính toán chi tiết</span>
+                {/* THÔNG BÁO SAI LỆCH VÀ PHẢN HỒI */}
+                {hasSubmitted && submissionFeedback && (
+                  <div className={`p-6 rounded-2xl border-2 flex items-center gap-6 animate-in zoom-in-95 duration-500 ${submissionFeedback.type === 'success' ? 'bg-emerald-50 border-emerald-100' : 'bg-orange-50 border-orange-100'}`}>
+                    <div className={`p-4 rounded-xl ${submissionFeedback.type === 'success' ? 'bg-emerald-500 shadow-emerald-200' : 'bg-orange-500 shadow-orange-200'} shadow-lg text-white`}>
+                      {submissionFeedback.type === 'success' ? <PartyPopper className="w-8 h-8" /> : <AlertCircle className="w-8 h-8" />}
                     </div>
-                    
-                    <div className="space-y-5 font-mono text-[13px] leading-relaxed">
-                      {/* Bước 1 */}
-                      <div>
-                        <p className="text-white font-bold border-l-4 border-indigo-500 pl-3 uppercase mb-2">Bước 1: Công thức lý thuyết</p>
-                        <div className="bg-slate-800 p-3 rounded-lg text-center text-blue-300">
-                          B = F / (N * I * L)
-                        </div>
-                        <p className="mt-1 text-slate-400">N={PHYSICS_CONSTANTS.N}, L={PHYSICS_CONSTANTS.L}m ⇒ (N*L)={PHYSICS_CONSTANTS.N * PHYSICS_CONSTANTS.L}</p>
-                      </div>
-
-                      {/* Bước 2 */}
-                      <div>
-                        <p className="text-white font-bold border-l-4 border-indigo-500 pl-3 uppercase mb-2">Bước 2: Tính giá trị B cho từng lần đo</p>
-                        <div className="space-y-1 bg-slate-800 p-3 rounded-lg overflow-x-auto">
-                          {validMeasurements.map((m, i) => (
-                            <div key={i}>
-                              B_{i+1} = {m.f.toFixed(3)} / ({PHYSICS_CONSTANTS.N * PHYSICS_CONSTANTS.L} * {m.current.toFixed(2)}) = <span className="text-emerald-400">{bValues[i].toFixed(4)} T</span>
-                            </div>
-                          ))}
-                        </div>
-                        <p className="mt-2">
-                          <span className="text-white font-bold">⇒ B̄ = </span> (Tổng B_i) / {bValues.length} = <span className="text-indigo-400 font-bold underline text-lg">{avgB_Actual.toFixed(4)} T</span>
-                        </p>
-                      </div>
-
-                      {/* Bước 3 */}
-                      <div>
-                        <p className="text-white font-bold border-l-4 border-indigo-500 pl-3 uppercase mb-2">Bước 3: Tính sai số tuyệt đối từng lần đo</p>
-                        <p className="text-[11px] text-slate-400 mb-2 italic">Công thức: ΔB_i = |B̄ - B_i|</p>
-                        <div className="space-y-1 bg-slate-800 p-3 rounded-lg overflow-x-auto">
-                          {deltaBValues.map((db, i) => (
-                            <div key={i}>
-                              ΔB_{i+1} = |{avgB_Actual.toFixed(4)} - {bValues[i].toFixed(4)}| = <span className="text-amber-400">{db.toFixed(4)} T</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* Bước 4 */}
-                      <div>
-                        <p className="text-white font-bold border-l-4 border-indigo-500 pl-3 uppercase mb-2">Bước 4: Sai số tuyệt đối trung bình</p>
-                        <div className="bg-slate-800 p-3 rounded-lg">
-                          ΔB̄ = (Σ ΔB_i) / {deltaBValues.length} = <span className="text-amber-400 font-bold underline text-lg">{avgDeltaB.toFixed(4)} T</span>
-                        </div>
-                      </div>
-
-                      <div className="pt-4 border-t border-slate-800 text-center">
-                        <p className="text-white font-bold">Kết quả cần ghi: B = {avgB_Actual.toFixed(4)} ± {avgDeltaB.toFixed(4)} (T)</p>
+                    <div className="flex-1">
+                      <p className={`font-black text-lg ${submissionFeedback.type === 'success' ? 'text-emerald-800' : 'text-orange-800'}`}>
+                        {submissionFeedback.message}
+                      </p>
+                      <div className="flex items-center gap-2 mt-1">
+                        <span className="text-sm font-bold opacity-60">Độ sai lệch so với hệ thống:</span>
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-black ${submissionFeedback.type === 'success' ? 'bg-emerald-200 text-emerald-700' : 'bg-orange-200 text-orange-700'}`}>
+                          {submissionFeedback.percent}%
+                        </span>
                       </div>
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+
+                <button 
+                  onClick={handleSync} 
+                  disabled={isSyncing || hasSubmitted} 
+                  className={`w-full flex items-center justify-center gap-3 py-6 rounded-2xl font-black transition-all shadow-xl active:scale-95 uppercase tracking-widest text-lg ${hasSubmitted ? 'bg-[#f0f4ff] text-[#6b7cff] cursor-default border border-[#e0e7ff]' : 'bg-orange-600 text-white hover:bg-orange-700'}`}
+                >
+                  {isSyncing ? <Loader2 className="w-6 h-6 animate-spin" /> : (hasSubmitted ? <CheckCircle2 className="w-6 h-6" /> : <CloudUpload className="w-6 h-6" />)}
+                  {hasSubmitted ? 'ĐÃ NỘP BÁO CÁO' : 'NỘP BÀI VÀ XEM GIẢI CHI TIẾT'}
+                </button>
+
+                {hasSubmitted && (
+                  <div className="mt-20 animate-in fade-in slide-in-from-bottom-12 duration-1000 space-y-12">
+                    <div className="bg-white p-10 rounded-[3rem] shadow-2xl border-2 border-indigo-50 space-y-12">
+                      <div className="flex items-center gap-4 border-b border-slate-100 pb-8">
+                        <div className="bg-indigo-600 p-3 rounded-2xl shadow-xl"><BookOpen className="w-8 h-8 text-white" /></div>
+                        <h4 className="text-3xl font-black text-slate-900 uppercase tracking-tight">Hướng dẫn giải chi tiết</h4>
+                      </div>
+
+                      <div className="space-y-16">
+                        <section className="space-y-8">
+                          <h5 className="font-black text-xl text-slate-800 flex items-center gap-3 italic">1. Kết quả chi tiết cho 4 lần đo</h5>
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            {solutionData.trials.map((t, i) => (
+                              <div key={i} className="bg-slate-50 p-8 rounded-3xl border border-slate-200 shadow-sm space-y-6 relative overflow-hidden group">
+                                <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-500 group-hover:bg-orange-500 transition-colors" />
+                                <h6 className="font-black text-indigo-700 text-lg uppercase tracking-tight underline">LẦN ĐO {i+1} (I = {t.i.toFixed(1)} A)</h6>
+                                <div className="font-mono text-sm space-y-6">
+                                  <div className="space-y-2">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">• Bước 1: Tính B<sub>{i+1}</sub></p>
+                                    <div className="flex items-center gap-4">
+                                      <span className="font-black text-slate-800">B<sub>{i+1}</sub> =</span>
+                                      <div className="flex flex-col items-center">
+                                        <span className="border-b border-slate-400 px-6 font-bold">{t.f.toFixed(3)}</span>
+                                        <span className="pt-1 text-[10px] font-bold text-slate-400">200 · {t.i.toFixed(1)} · 0,08</span>
+                                      </div>
+                                      <span className="font-black text-orange-600">≈ {t.b.toFixed(6)} T</span>
+                                    </div>
+                                  </div>
+                                  <div className="pt-4 border-t border-slate-200 space-y-2">
+                                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">• Bước 2: Sai số tuyệt đối ΔB<sub>{i+1}</sub></p>
+                                    <p className="text-slate-700">
+                                      ΔB<sub>{i+1}</sub> = |{solutionData.avgBRounded} - {t.b.toFixed(6)}| = <span className="font-black text-emerald-600">{t.deltaBi.toFixed(6)} T</span>
+                                    </p>
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </section>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                          <section className="bg-indigo-50/50 p-8 rounded-[2.5rem] border border-indigo-100 text-center space-y-4">
+                            <h5 className="font-black text-slate-800 text-lg italic uppercase">2. Giá trị trung bình B̄</h5>
+                            <div className="font-mono">
+                               B̄ = ΣB<sub>i</sub> / 4 ≈ <span className="text-2xl font-black text-indigo-600">{solutionData.avgB.toFixed(8)}</span>
+                               <div className="mt-4 bg-white inline-block px-8 py-2 rounded-full border border-indigo-200 text-emerald-600 font-black shadow-sm">Làm tròn: {solutionData.avgBRounded} T</div>
+                            </div>
+                          </section>
+                          <section className="bg-slate-50 p-8 rounded-[2.5rem] border border-slate-200 text-center space-y-4">
+                            <h5 className="font-black text-slate-800 text-lg italic uppercase">3. Sai số tuyệt đối ΔB̄</h5>
+                            <div className="font-mono">
+                               ΔB̄ = ΣΔB<sub>i</sub> / 4 ≈ <span className="text-2xl font-black text-indigo-600">{solutionData.avgDeltaB.toFixed(8)}</span>
+                               <div className="mt-4 bg-white inline-block px-8 py-2 rounded-full border border-indigo-200 text-emerald-600 font-black shadow-sm">Làm tròn: {solutionData.avgDeltaBRounded} T</div>
+                            </div>
+                          </section>
+                        </div>
+
+                        <section className="flex flex-col items-center gap-10 pt-16 border-t border-slate-100">
+                           <div className="text-center space-y-4">
+                              <p className="font-black text-slate-400 uppercase text-[10px] tracking-[0.6em]">KẾT QUẢ CUỐI CÙNG CHUẨN XÁC</p>
+                              <div className="bg-[#050914] text-white px-20 py-12 rounded-[3.5rem] font-mono font-black text-5xl shadow-2xl relative">
+                                 <span className="text-indigo-400">B = </span>{solutionData.avgBRounded} ± {solutionData.avgDeltaBRounded} (T)
+                              </div>
+                           </div>
+                           <div className="p-10 bg-indigo-50/50 rounded-[3rem] border border-indigo-100 w-full max-w-2xl text-center space-y-8">
+                             <div className="space-y-2">
+                               <p className="text-xl font-black text-slate-800">Bạn muốn cải thiện kỹ năng đo lường?</p>
+                               <p className="text-sm text-slate-500 italic">Nhấn nút bên dưới để thử thách với cấu hình nam châm mới.</p>
+                             </div>
+                             <button onClick={handleReset} className="flex items-center justify-center gap-4 w-full py-6 bg-[#5a46ff] hover:bg-[#4a36ef] text-white rounded-2xl font-black shadow-2xl shadow-indigo-300 transition-all hover:-translate-y-1 active:scale-95 uppercase tracking-widest text-xl group">
+                                <RefreshCcw className="w-6 h-6 group-hover:rotate-180 transition-transform duration-700" /> THỰC HÀNH LẠI THÍ NGHIỆM MỚI
+                             </button>
+                           </div>
+                        </section>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
-
-          <div className="lg:col-span-4 space-y-6 sticky top-24">
-            <Controls 
-              currentI={session.currentI}
-              onCurrentChange={handleCurrentChange}
-              onBalance={handleBalance}
-              onReset={handleReset}
-              isBalanced={session.isBalanced}
-              isOverheated={session.isOverheated}
-            />
-            
+          
+          <div className="lg:col-span-4 space-y-6">
             <div className="bg-white p-6 rounded-2xl shadow-xl border border-slate-200">
-              <h4 className="font-black text-slate-800 mb-4 border-b border-slate-100 pb-3 flex items-center justify-between">
-                <span>THÔNG SỐ MÁY</span>
-                <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full uppercase">Lab Ver 2.1</span>
+              <h4 className="font-black text-slate-800 mb-6 uppercase text-xs flex items-center gap-2 border-b border-slate-100 pb-3">
+                <Settings2 className="w-4 h-4 text-indigo-600" /> Thông số thiết bị (11.1)
               </h4>
-              <ul className="space-y-3 text-sm text-slate-600 font-mono">
-                <li className="flex justify-between items-center">
-                  <span className="text-slate-400">Số vòng dây:</span>
-                  <span className="text-slate-900 font-bold bg-slate-100 px-2 py-0.5 rounded">N = {PHYSICS_CONSTANTS.N}</span>
-                </li>
-                <li className="flex justify-between items-center">
-                  <span className="text-slate-400">Chiều dài PQ:</span>
-                  <span className="text-slate-900 font-bold bg-slate-100 px-2 py-0.5 rounded">L = {PHYSICS_CONSTANTS.L} m</span>
-                </li>
-              </ul>
-              
-              <div className="mt-6 p-4 bg-indigo-50 rounded-xl border border-indigo-100">
-                <p className="text-[11px] font-bold text-indigo-800 uppercase mb-2 tracking-wider">Cơ sở lý thuyết</p>
-                <div className="text-[12px] text-indigo-900 italic font-serif leading-relaxed">
-                  "Lực từ tác dụng lên đoạn dây dẫn tỉ lệ thuận với cường độ dòng điện, cảm ứng từ và chiều dài đoạn dây."
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-center">
+                  <div className="text-[10px] font-bold text-indigo-400 uppercase mb-1">Số vòng dây (N)</div>
+                  <div className="text-2xl font-black text-indigo-700 font-mono">200</div>
                 </div>
-                <div className="mt-2 text-center font-mono font-bold text-indigo-600">F = N.I.B.L</div>
+                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-center">
+                  <div className="text-[10px] font-bold text-indigo-400 uppercase mb-1">Chiều dài (L)</div>
+                  <div className="text-2xl font-black text-indigo-700 font-mono">0,08<span className="text-xs ml-1 font-sans">m</span></div>
+                </div>
               </div>
             </div>
+
+            <Controls currentI={session.currentI} onCurrentChange={handleCurrentChange} onBalance={handleBalance} onReset={() => { if(window.confirm("Bắt đầu thí nghiệm mới?")) handleReset(); }} isBalanced={session.isBalanced} isOverheated={session.isOverheated} />
           </div>
         </div>
       </main>
-
-      <footer className="fixed bottom-0 inset-x-0 bg-white border-t border-slate-200 py-3 z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.05)]">
-        <div className="max-w-7xl mx-auto px-6 flex items-center justify-between">
-          <div className="flex items-center gap-4 text-xs font-medium text-slate-400 uppercase tracking-widest">
-            <span>Thiết bị: Current Balance Model B-200</span>
-            <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-            <span>Trường THPT Chuyên - Vật Lý 12</span>
-          </div>
-          <div className="hidden sm:block text-[11px] text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-full border border-indigo-100">
-            Thực hiện bởi Chuyên Gia Sư Phạm Vật Lý
-          </div>
-        </div>
-      </footer>
     </div>
   );
 };

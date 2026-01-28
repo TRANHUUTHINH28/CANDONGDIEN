@@ -1,10 +1,22 @@
 
 export interface Measurement {
   id: string;
-  current: number; // I (A)
-  f1: number;      // F1 (N) - systematic offset
-  f2: number;      // F2 (N) - measured total force
-  f: number;       // F = F2 - F1 (N)
+  // Giá trị thực từ mô phỏng (dùng để đối soát ẩn)
+  trueCurrent: number;
+  trueF1: number;
+  trueF2: number;
+  trueF: number;
+  
+  // Giá trị do học sinh tự quan sát và điền vào
+  inputI: string;
+  inputF1: string;
+  inputF2: string;
+  inputF: string;
+  inputB: string; // Giá trị B tính toán cho riêng lần đo này
+  
+  // Trạng thái kiểm tra của dòng này
+  isValidated?: boolean;
+  isCorrect?: boolean;
 }
 
 export interface SimulationState {

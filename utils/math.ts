@@ -10,7 +10,7 @@ export const gaussianRandom = (mean: number, stdDev: number): number => {
 };
 
 /**
- * Constants for the Current Balance Experiment
+ * Constants for the Current Balance Experiment (Based on Image 11.1)
  */
 export const PHYSICS_CONSTANTS = {
   N: 200,          // Number of turns
@@ -19,7 +19,7 @@ export const PHYSICS_CONSTANTS = {
 };
 
 /**
- * Calculate the magnetic force F = N*I*B*L
+ * Calculate the magnetic force F = N*I*B*L (theta = 90 deg)
  */
 export const calculateMagneticForce = (i: number, b: number): number => {
   return PHYSICS_CONSTANTS.N * i * b * PHYSICS_CONSTANTS.L;
