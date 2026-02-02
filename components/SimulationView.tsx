@@ -36,7 +36,7 @@ const SimulationView: React.FC<SimulationViewProps> = ({ currentI, tiltAngle, is
   const magnetCenterX = pivotX + rightHangOffset;
   const magnetBaseY = tableY - 15;
   const magnetWidth = 120;
-  const magnetPoleWidth = 35;
+  const magnetPoleWidth = 25;
   const magnetPoleHeight = 120; 
   const magnetBaseThickness = 20;
   
