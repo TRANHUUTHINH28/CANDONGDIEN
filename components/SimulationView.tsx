@@ -35,9 +35,9 @@ const SimulationView: React.FC<SimulationViewProps> = ({ currentI, tiltAngle, is
   // Nam châm 3D hình chữ U
   const magnetCenterX = pivotX + rightHangOffset;
   const magnetBaseY = tableY - 15;
-  const magnetWidth = 140;
+  const magnetWidth = 120;
   const magnetPoleWidth = 35;
-  const magnetPoleHeight = 140; 
+  const magnetPoleHeight = 120; 
   const magnetBaseThickness = 20;
   
   // Thông số 3D (Độ sâu/Bề rộng khung)
