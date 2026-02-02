@@ -41,7 +41,7 @@ const SimulationView: React.FC<SimulationViewProps> = ({ currentI, tiltAngle, is
   const magnetBaseThickness = 20;
   
   // Thông số 3D (Độ sâu/Bề rộng khung)
-  const depth3D = 58; 
+  const depth3D = 48; 
   const depthY = -28;
 
   const colors = {
